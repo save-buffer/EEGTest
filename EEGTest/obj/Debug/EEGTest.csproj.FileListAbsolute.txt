@@ -1,0 +1,8 @@
+G:\EEGTest\EEGTest\bin\Debug\EEGTest.exe.config
+G:\EEGTest\EEGTest\bin\Debug\EEGTest.exe
+G:\EEGTest\EEGTest\bin\Debug\EEGTest.pdb
+G:\EEGTest\EEGTest\obj\Debug\EEGTest.csprojResolveAssemblyReference.cache
+G:\EEGTest\EEGTest\obj\Debug\EEGTest.exe
+G:\EEGTest\EEGTest\obj\Debug\EEGTest.pdb
+G:\EEGTest\EEGTest\bin\Debug\MathNet.Numerics.dll
+G:\EEGTest\EEGTest\bin\Debug\MathNet.Numerics.xml
