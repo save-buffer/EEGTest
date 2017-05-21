@@ -14,3 +14,4 @@ C:\Users\Sasha\EEGTest\EEGTest\bin\Debug\EEGTest.exe
 C:\Users\Sasha\EEGTest\EEGTest\bin\Debug\EEGTest.pdb
 C:\Users\Sasha\EEGTest\EEGTest\bin\Debug\MathNet.Numerics.dll
 C:\Users\Sasha\EEGTest\EEGTest\bin\Debug\MathNet.Numerics.xml
+C:\Users\Sasha\EEGTest\EEGTest\bin\Debug\System.ValueTuple.dll
