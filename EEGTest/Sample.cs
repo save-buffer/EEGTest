@@ -10,8 +10,8 @@ namespace EEGTest
     {
         public bool Daisy = false;
         public byte SampleNumber;
-        public float[] Channels = new float[8];
-        public float AX, AY, AZ;
+        public double[] Channels = new double[8];
+        public double AX, AY, AZ;
 
         public override string ToString()
         {

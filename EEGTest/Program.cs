@@ -5,6 +5,7 @@ using System.Linq;
 using System.Numerics;
 using System.Windows.Forms;
 using MathNet.Numerics.IntegralTransforms;
+using MathNet.Filtering;
 
 namespace EEGTest
 {
@@ -20,6 +21,9 @@ namespace EEGTest
         const double HI_Beta = 35.0;
         //Gamma?
 
+        static OnlineFilter Notch = OnlineFilter.CreateBandstop(ImpulseResponse.Infinite, 125, 59, 61);
+        static OnlineFilter BandPass = OnlineFilter.CreateBandpass(ImpulseResponse.Infinite, 125, 0.5, 30);
+
         public static void Assert(bool x)
         {
             if (x)
@@ -27,11 +31,25 @@ namespace EEGTest
             throw new Exception("Assertion was false!");
         }
 
+        public static double[] GetChannel(int channel, double[,] data)
+        {
+            double[] result = new double[data.GetUpperBound(1) + 1];
+            for (int i = 0; i < result.Length; i++)
+                result[i] = data[channel, i];
+            return result;
+        }
+
+        public static void SetChannel(int channel, double[,] data, double[] channel_data)
+        {
+            for (int i = 0; i < channel_data.Length; i++)
+                data[channel, i] = channel_data[i];
+        }
+
         //Data is in the format [Channel Number, Sample Number]
         public static double[,] ReadDataFromFile(string File)
         {
             string d = System.IO.File.ReadAllText(File);
-            double[] arr = (from s in d.Split(null) where s != "" select double.Parse(s) * 10.0e2).ToArray();
+            double[] arr = (from s in d.Split(null) where s != "" select double.Parse(s) * 10.0e1).ToArray();
             Assert(arr.Length % 16 == 0);
             double[,] data = new double[16, arr.Length / 16];
             for (int i = 0; i < arr.Length; i++)
@@ -50,7 +68,6 @@ namespace EEGTest
             return result;
         }
 
-
         public static double[,] ConcatenateArrays(double[,] a, double[,] b)
         {
             double[,] result = new double[a.GetUpperBound(0) + b.GetUpperBound(0) + 2, a.GetUpperBound(1) + 1];
@@ -67,9 +84,9 @@ namespace EEGTest
             return result;
         }
 
-        //Hz = Frequency, Fs = Sampling Rate, N = Size of FFT, n = index
+        // Hz = Frequency, Fs = Sampling Rate, N = Size of FFT, n = index
         // Hz = n * Fs / N => n = N * Hz / Fs
-        static int FFTIndex(double Hz, int SamplingRate, int N) => (int)(N * Hz / SamplingRate);
+        static int FFTIndex(double Hz, int SamplingRate, int N) => (int)Math.Round(N * Hz / SamplingRate);
 
         public static double[] FFT(double[] data)
         {
@@ -86,6 +103,8 @@ namespace EEGTest
             {
                 for (int j = 0; j < x.Length; j++)
                     x[j] = data[i, j];
+                x = Notch.ProcessSamples(x);
+                x = BandPass.ProcessSamples(x);
                 result[i] = FFT(x);
             }
             return result;
@@ -107,14 +126,17 @@ namespace EEGTest
             return result;
         }
 
-        //Splits the samples up into chunks of 16
+        const int chunk_size = 38;
+        //Splits the samples up into chunks of 38 for about 300 ms
+        //Study has 80% overlap of time windows, so 7-8 are thrown out for us
         static FFT_Channel[,] CreateFFTData(double[,] RawData)
         {
             FFT_Channel[,] Result = new FFT_Channel[16, (RawData.GetUpperBound(1) + 1) / 16];
-            for (int i = 0; i < (RawData.GetUpperBound(1) + 1) / 16; i++)
+
+            for (int i = 0; i < (RawData.GetUpperBound(1) + 1) / chunk_size; i++)
             {
-                int first = i * 16;
-                var x = SampleRange(first, first + 15, RawData);
+                int first = i * chunk_size;
+                var x = SampleRange(first, first + chunk_size - 1, RawData);
                 var channels = SelectFFT_Sample(x);
                 for (int j = 0; j < 16; j++)
                 {
@@ -123,30 +145,42 @@ namespace EEGTest
             }
             return Result;
         }
-
-        // data = [16 x N], result = [N x 96]
+        int BrainWaves = 4;
+        // data = [16 x N], result = [N x (W * 16)]
         static double[,] PackFFTDataForNeuralNet(FFT_Channel[,] data)
         {
-            double[,] result = new double[data.GetUpperBound(1) + 1, (data.GetUpperBound(0) + 1) * 6];
+            double[,] result = new double[data.GetUpperBound(1) + 1, (data.GetUpperBound(0) + 1) * 4];
             for (int i = 0; i < data.GetUpperBound(1) + 1; i++)
             {
-                for (int j = 0; j < data.GetUpperBound(0) + 1; j += 6)
+                for (int j = 0; j < data.GetUpperBound(0) + 1; j++)
                 {
-                    result[i, j] = data[j, i].Delta;
-                    result[i, j + 1] = data[j, i].Theta;
-                    result[i, j + 2] = data[j, i].Alpha;
-                    result[i, j + 3] = data[j, i].SMR_Beta;
-                    result[i, j + 4] = data[j, i].MID_Beta;
-                    result[i, j + 5] = data[j, i].HI_Beta;
+                    //result[i, 6 * j] = data[j, i].Delta;
+                    //result[i, 6 * j + 1] = data[j, i].Theta;
+                    result[i, 4 * j] = data[j, i].Alpha;
+                    result[i, 4 * j + 1] = data[j, i].SMR_Beta;
+                    result[i, 4 * j + 2] = data[j, i].MID_Beta;
+                    result[i, 4 * j + 3] = data[j, i].HI_Beta;
                 }
             }
             return result;
         }
 
-        static double[,] RawToPackedNNData(double[,] raw)
+        static double[] FatSamplesToPackedNNData(FatSample[] samples)
         {
-            return PackFFTDataForNeuralNet(CreateFFTData(raw));
+            double[,] raw = new double[16, samples.Length];
+            for (int i = 0; i < raw.GetUpperBound(0) + 1; i++)
+            {
+                for (int j = 0; j < 16; j++)
+                    raw[i, j] = samples[i].Channels[j];
+            }
+            var _res = RawToPackedNNData(raw);
+            double[] result = new double[96];
+            for (int i = 0; i < 96; i++)
+                result[i] = _res[0, i];
+            return result;
         }
+
+        static double[,] RawToPackedNNData(double[,] raw) => PackFFTDataForNeuralNet(CreateFFTData(raw));
 
         static void TestFFT()
         {
@@ -168,7 +202,7 @@ namespace EEGTest
 
         public static void CollectData(string File)
         {
-            const int samples_to_collect = 500;
+            const int samples_to_collect = 20000;
             EEG eeg = new EEG(COM);
             eeg.Start();
             Console.WriteLine("Connected");
@@ -194,7 +228,7 @@ namespace EEGTest
         {
             Console.WriteLine("Ready?");
             Console.ReadLine();
-            CollectData("Up.txt");
+            //CollectData("Up.txt");
             Console.WriteLine("Now we're training going down");
             Console.ReadLine();
             CollectData("Down.txt");
@@ -215,32 +249,40 @@ namespace EEGTest
             }
             return NeuralNet.ChooseBestNeuralNet(training_set, Y, new int[][]
                 {
-                    new int[] { 96, 100, 2 },
-                    new int[] { 96, 40, 2},
-                    new int[] { 96, 48, 24, 12, 6, 2}
-                }, 200);
+                    //new int[] { 64  , 100, 2 },
+                    //new int[] { 64  , 40, 2 },
+                    //new int[] { 64  , 48, 24, 12, 6, 2 },
+                    //new int[] { 64  , 100, 120, 130, 100, 2 }
+                    new int[] { 64, 33, 2 }
+                }, 2000, new double[] { 1.0 });
         }
 
         static void EEGTestWithNN2()
         {
+            Console.WriteLine("Training Neural Network");
+            var n = NNCollectedData2();
+            Console.WriteLine($"Percent correct: {n.PercentCorrect()}");
+            Console.WriteLine("Awaiting Connection");
             EEG eeg = new EEG(COM);
             eeg.Start();
-            var n = NNCollectedData2();
+            Console.WriteLine("Connected");
             Stopwatch s = new Stopwatch();
             s.Start();
             while (s.ElapsedMilliseconds < 60000)
             {
-                FatSample f = new FatSample(eeg.ReadSample(), eeg.ReadSample());
-
-                Console.WriteLine(n.Predict(f.Channels) == 0 ? "Up" : "Down");
+                FatSample[] f = new FatSample[chunk_size];
+                for (int i = 0; i < f.Length; i++)
+                    f[i] = new FatSample(eeg.ReadSample(), eeg.ReadSample());
+                Console.WriteLine(n.Predict(FatSamplesToPackedNNData(f)) == 0 ? "Up" : "Down");
             }
         }
 
         static void Main(string[] args)
         {
-            var n = NNCollectedData2();
-            Console.WriteLine($"Percent correct: {n.PercentCorrect()}");
-            //CollectData2(); 
+            //            var n = NNCollectedData2();
+            //          Console.WriteLine($"Percent correct: {n.PercentCorrect()}");
+            //CollectData2();
+            EEGTestWithNN2();
             Console.ReadLine();
         }
     }
